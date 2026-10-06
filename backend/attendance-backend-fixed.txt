@@ -75,12 +75,14 @@ function permittedSheet(sql, operation, name) {
   if (!sheet) fail('Sheet not found: ' + name)
   return sheet
 }
-function names_to_columns(columns) {
+function names_to_columns(columns, sheetName = '') {
   const index = Object.create(null)
   columns.forEach((name, i) => {
     // Unnamed spacer columns may exist, but cannot be queried by name.
     if (name === '') return
-    if (typeof name !== 'string' || own(index, name)) fail('Invalid or duplicate column heading: ' + name)
+    const location = (sheetName ? JSON.stringify(sheetName) + '!' : '') + columnLetter(i) + '1'
+    if (typeof name !== 'string') fail('Invalid column heading at ' + location + ': expected text, found ' + String(name))
+    if (own(index, name)) fail('Invalid or duplicate column heading at ' + location + ': ' + name)
     index[name] = i
   })
   return index
@@ -93,7 +95,7 @@ function schema(sheet) {
   const width = sheet.getLastColumn()
   if (!width) fail('Sheet has no column headings')
   const columns = sheet.getRange(1, 1, 1, width).getValues()[0]
-  return {columns, index: names_to_columns(columns)}
+  return {columns, index: names_to_columns(columns, sheet.getName())}
 }
 function scalar(value) {
   if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) fail('Expected a scalar value')

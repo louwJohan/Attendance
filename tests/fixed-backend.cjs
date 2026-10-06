@@ -2,6 +2,7 @@ const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:a
 let data, reads, writes, locked, released, busy = false
 function reset() { data = [['UB Number', 'session1', 'comment1', 'unused'], [123, '', '', '=formula'], [456, '', '', 'keep']]; reads = []; writes = 0; locked = false; released = false }
 const sheet = {
+    getName: () => 'lesson',
     getLastColumn: () => data[0].length, getLastRow: () => data.length, getMaxRows: () => 100,
     getRange(r, c, h = 1, w = 1) {
         assert.ok(r > 0 && c > 0 && h > 0 && w > 0)
@@ -71,6 +72,13 @@ test('Duplicate headers and unknown select columns fail',()=>{
     assert.throws(()=>context.names_to_columns(['x','x']),/duplicate/)
     assert.equal(context.names_to_columns(['constructor']).constructor,0)
 })
+test('Invalid date heading identifies sheet and cell before writes',()=>{
+    data[0][3] = vm.runInContext('new Date(2026, 9, 6, 19, 4, 27)', context)
+    assert.throws(()=>update(),/Invalid column heading at "lesson"!D1: expected text/)
+    assert.equal(writes,0)
+    assert.ok(released)
+})
+
 test('Sorting ties advance to next key',()=>{
     const compare=context.comparison([['date','ascdate'],['rank','asc']],{date:0,rank:1})
     assert.equal(compare(['2026-01-01',2],['01/01/2026',1]),1)

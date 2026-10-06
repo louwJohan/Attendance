@@ -136,7 +136,9 @@ async function chooseParameter(
 // Cache successful reads for this page, but allow failed reads to be retried.
 function readTable(name) {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 30000)
+    // Allow slow Apps Script starts and spreadsheet reads to finish.
+    const timeoutMs = 90000
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     const promise = sheet.doGet(
         {
             db,
@@ -146,7 +148,7 @@ function readTable(name) {
         { signal: controller.signal }
     ).catch(error => {
         if (error.name === 'AbortError') {
-            throw new Error('The database took too long to respond. Please retry.')
+            throw new Error('Loading "' + name + '" timed out after ' + (timeoutMs / 1000) + ' seconds. Please retry.')
         }
         throw error
     }).finally(() => clearTimeout(timer))
