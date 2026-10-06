@@ -1,0 +1,99 @@
+* {
+    box-sizing: border-box;
+    font-family: Arial;
+}
+
+.layout1 {
+    display: grid;
+    grid-template-columns: auto;
+    row-gap: 10px;
+    position: relative;
+    margin: auto;
+    width: 300px;
+}
+
+.layout2 {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    row-gap: 10px;
+    column-gap: 0px;
+    position: relative;
+    margin: auto;
+    width: 300px;
+}
+
+.gridel {
+    position: relative;
+    font-size: 11pt;
+}
+
+.gray {
+    background-color: rgb(230, 230, 230);
+}
+
+.gridel2 {
+    position: relative;
+    font-size: 11pt;
+    grid-column: 1 / span 2;
+}
+
+button.gridel {
+    padding: 10px;
+    font-size: 11pt;
+    font-weight: bold;
+    border: 0;
+}
+
+.title1 {
+    background: teal;
+    color: white;
+    text-align: center;
+}
+
+.title2 {
+    background: teal;
+    color: white;
+    text-align: center;
+    grid-column: 1 / span 2;
+}
+
+.month_title {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #95dbda;
+    font-weight: bold;
+    border-bottom: 1px solid black;
+}
+
+.day_title {
+    background-color: #a5d6f2;
+    padding: 5px;
+}
+
+.bigbutton {
+    padding: 10px;
+    font-size: 11pt;
+    font-weight: bold;
+}
+
+dialog {
+    width: 280px;
+    border: 0;
+    background: #d9bf77;
+    border-radius: 10px;
+    border: 1px solid #6e613c;
+    box-shadow: 0px 0px 5px 5px #00000077;
+}
+
+dialog#warning {
+    background: red;
+}
+
+dialog#info {
+    background: #d9bf77;
+}
+
+dialog button {
+    font-size: 12pt;
+    font-weight: bold;
+}

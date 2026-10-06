@@ -1,0 +1,276 @@
+/* Combined replacement for Code.gs and utils.gs.
+Remove the old contents of both files before installing this single file.
+Keep the existing deployment URL; publish a new version of that deployment.
+Database keys and permissions are preserved. The testing key remains unpermitted.
+Filters: [column, operator, literal]; column-to-column comparisons use {column: name}.
+Updates require where, or explicit all:true. No automatic write retries.
+Script locks serialize this project only; they do not lock human spreadsheet edits.
+Service failures can still leave partial writes: inspect records before retrying.
+*/
+
+let myIds = { // put your spreadsheet ids here
+    'testing': 'TEST_SPREADSHEET_ID', // copy of stage 1
+    'STAGE1_TEACHER_KEY': "STAGE1_SPREADSHEET_ID", // attendance 1 teachers
+    'STAGE1_STUDENT_KEY': "STAGE1_SPREADSHEET_ID", // attendance 1 students
+    'STAGE2_TEACHER_KEY': "STAGE2_SPREADSHEET_ID", // attendance 2 teachers
+    'STAGE2_STUDENT_KEY': "STAGE2_SPREADSHEET_ID" // attendance 2 students
+  },
+  permits = {
+    'STAGE1_TEACHER_KEY': {select:'*', update:'*', insert:'*'}, // stage 1 teachers
+    'STAGE1_STUDENT_KEY': {select:'*', insert:'absence reports'}, // stage 1 students
+    'STAGE2_TEACHER_KEY': {select:'*', update:'*', insert:'*'}, // stage 2 teachers
+    'STAGE2_STUDENT_KEY': {select:'*', insert:'absence reports'}, // stage 2 students
+  }
+
+let token = null // set to non-null to create token authorization
+
+const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key)
+function fail(message) { throw new Error(message) }
+function isObject(value) { return value !== null && typeof value === 'object' && !Array.isArray(value) }
+function authorize_me() {
+  for (const id of new Set(Object.values(myIds))) SpreadsheetApp.openById(id)
+}
+function JSONresponse(value) {
+  return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON)
+}
+function requestResult(action) {
+  try { return JSONresponse(action()) }
+  catch (error) { return JSONresponse({message: error && error.message ? error.message : String(error)}) }
+}
+function checkToken(params) {
+  // Accept the client's legacy pin field as well as token, if configured.
+  if (token !== null && (params.token ?? params.pin) !== token) fail('Not authorized')
+}
+function doGet(e) {
+  return requestResult(() => {
+    const params = e && e.parameter
+    if (!params || typeof params.sql !== 'string') fail('Missing sql parameter')
+    checkToken(params)
+    // Apps Script has already URL-decoded e.parameter.
+    return runSQL(JSON.parse(params.sql))
+  })
+}
+function doPost(e) {
+  return requestResult(() => {
+    const body = JSON.parse(e && e.postData ? e.postData.contents : '')
+    if (!isObject(body)) fail('Invalid request body')
+    checkToken(body)
+    return runSQL(body.sql)
+  })
+}
+function runSQL(sql) {
+  if (!isObject(sql)) fail('SQL must be an object')
+  const operations = ['select', 'update', 'insert_into'].filter(key => own(sql, key))
+  if (operations.length !== 1) fail('Specify exactly one operation')
+  if (operations[0] === 'select') return doSelect(sql)
+  if (operations[0] === 'update') return doUpdate(sql)
+  return doInsert(sql)
+}
+function permittedSheet(sql, operation, name) {
+  if (!own(myIds, sql.db) || !own(permits, sql.db)) fail('Unknown or unpermitted database')
+  if (typeof name !== 'string' || !name) fail('Missing sheet name')
+  const grant = permits[sql.db][operation]
+  if (!(grant === '*' || (Array.isArray(grant) ? grant.includes(name) : grant === name))) fail('Permission denied for ' + operation)
+  const sheet = SpreadsheetApp.openById(myIds[sql.db]).getSheetByName(name)
+  if (!sheet) fail('Sheet not found: ' + name)
+  return sheet
+}
+function names_to_columns(columns) {
+  const index = Object.create(null)
+  columns.forEach((name, i) => {
+    // Unnamed spacer columns may exist, but cannot be queried by name.
+    if (name === '') return
+    if (typeof name !== 'string' || own(index, name)) fail('Invalid or duplicate column heading: ' + name)
+    index[name] = i
+  })
+  return index
+}
+function columnIndex(name, columns) {
+  if (typeof name !== 'string' || !own(columns, name)) fail('Unknown column: ' + String(name))
+  return columns[name]
+}
+function schema(sheet) {
+  const width = sheet.getLastColumn()
+  if (!width) fail('Sheet has no column headings')
+  const columns = sheet.getRange(1, 1, 1, width).getValues()[0]
+  return {columns, index: names_to_columns(columns)}
+}
+function scalar(value) {
+  if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) fail('Expected a scalar value')
+  if (typeof value === 'number' && !Number.isFinite(value)) fail('Invalid number')
+  return value
+}
+function predicate(where, columns, needed = new Set()) {
+  if (!Array.isArray(where) || where.length !== 3) fail('Filter must be [column, operator, value]')
+  const [left, op, right] = where
+  if (op === '&&' || op === '||') {
+    const a = predicate(left, columns, needed), b = predicate(right, columns, needed)
+    return op === '&&' ? row => a(row) && b(row) : row => a(row) || b(row)
+  }
+  const index = columnIndex(left, columns)
+  needed.add(index)
+  if (op === 'in') {
+    if (!Array.isArray(right)) fail('IN requires an array')
+    right.forEach(scalar)
+    return row => right.some(value => row[index] == value)
+  }
+  let value
+  if (isObject(right) && Object.keys(right).length === 1 && own(right, 'column')) {
+    const other = columnIndex(right.column, columns)
+    needed.add(other)
+    value = row => row[other]
+  } else {
+    scalar(right)
+    value = () => right
+  }
+  switch (op) {
+    case '=': case '==': return row => row[index] == value(row)
+    case '<>': case '!=': return row => row[index] != value(row)
+    case '<': return row => row[index] < value(row)
+    case '<=': return row => row[index] <= value(row)
+    case '>': return row => row[index] > value(row)
+    case '>=': return row => row[index] >= value(row)
+    default: fail('Unsupported filter operator: ' + op)
+  }
+}
+function asDate(value) {
+  if (value instanceof Date) return value.getTime()
+  const days = {mo:1, tu:2, we:3, th:4, fr:5, sa:6, su:7}
+  if (typeof value === 'string') {
+    const day = value.toLowerCase().slice(0, 2)
+    if (own(days, day)) return days[day]
+  }
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? value : parsed
+}
+function comparison(ordering, columns, needed = new Set()) {
+  if (typeof ordering === 'string') ordering = [[ordering, 'asc']]
+  if (!Array.isArray(ordering)) fail('Invalid ordering')
+  const specs = ordering.map(item => {
+    if (typeof item === 'string') item = [item, 'asc']
+    if (!Array.isArray(item) || item.length !== 2) fail('Sort entries must be [column, direction]')
+    const [name, direction] = item, index = columnIndex(name, columns)
+    if (!['asc', 'desc', 'ascdate', 'descdate'].includes(direction)) fail('Invalid sort direction')
+    needed.add(index)
+    return {index, direction}
+  })
+  return (a, b) => {
+    for (const {index, direction} of specs) {
+      const x = direction.endsWith('date') ? asDate(a[index]) : a[index]
+      const y = direction.endsWith('date') ? asDate(b[index]) : b[index]
+      const difference = x < y ? -1 : x > y ? 1 : 0
+      if (difference) return direction.startsWith('desc') ? -difference : difference
+    }
+    return 0
+  }
+}
+function limitOf(sql) {
+  if (!own(sql, 'limit')) return Infinity
+  if (!Number.isSafeInteger(sql.limit) || sql.limit < 0) fail('limit must be a nonnegative integer')
+  return sql.limit
+}
+function selection(sql, columns) {
+  const index = names_to_columns(columns), needed = new Set()
+  const selected = sql.select === '*' ? columns.map((_, i) => i) :
+    (Array.isArray(sql.select) ? sql.select : [sql.select]).map(name => columnIndex(name, index))
+  if (!selected.length) fail('Select at least one column')
+  selected.forEach(i => needed.add(i))
+  const filter = own(sql, 'where') ? predicate(sql.where, index, needed) : () => true
+  const sort = own(sql, 'order_by') ? comparison(sql.order_by, index, needed) : null
+  const limit = limitOf(sql)
+  return {needed, apply(data) {
+    let rows = data.filter(filter)
+    if (sort) rows.sort(sort)
+    rows = rows.map(row => selected.map(i => row[i]))
+    if (sql.distinct) {
+      const seen = new Set()
+      rows = rows.filter(row => {
+        const key = JSON.stringify(row)
+        if (seen.has(key)) return false
+        seen.add(key); return true
+      })
+    }
+    return {columns: selected.map(i => columns[i]), data: rows.slice(0, limit)}
+  }}
+}
+function run_select(sql, columns, data) { return selection(sql, columns).apply(data) }
+function readColumns(sheet, needed, rowCount) {
+  const rows = Array.from({length: rowCount}, () => [])
+  if (!rowCount) return rows
+  const indices = [...needed].sort((a, b) => a - b)
+  // Read adjacent columns together; never fetch unrelated attendance history.
+  for (let p = 0; p < indices.length;) {
+    const start = indices[p]; let end = start
+    while (++p < indices.length && indices[p] === end + 1) end = indices[p]
+    const block = sheet.getRange(2, start + 1, rowCount, end - start + 1).getValues()
+    block.forEach((values, r) => values.forEach((value, c) => { rows[r][start + c] = value }))
+  }
+  return rows
+}
+function doSelect(sql) {
+  const sheet = permittedSheet(sql, 'select', sql.from), meta = schema(sheet)
+  const plan = selection(sql, meta.columns)
+  return plan.apply(readColumns(sheet, plan.needed, Math.max(0, sheet.getLastRow() - 1)))
+}
+function withWriteLock(action) {
+  const lock = LockService.getScriptLock()
+  if (!lock.tryLock(10000)) fail('Database is busy. Save was not started; please retry.')
+  try { return action() }
+  finally {
+    try { SpreadsheetApp.flush() } finally { lock.releaseLock() }
+  }
+}
+function cellValue(value) {
+  scalar(value)
+  // Treat user-entered comments as text rather than executable formulas.
+  return typeof value === 'string' && value.startsWith('=') ? "'" + value : value ?? ''
+}
+function columnLetter(index) {
+  let result = ''
+  for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) result = String.fromCharCode(65 + (n - 1) % 26) + result
+  return result
+}
+function doUpdate(sql) {
+  const sheet = permittedSheet(sql, 'update', sql.update)
+  if (!isObject(sql.set) || !Object.keys(sql.set).length) fail('Missing update values')
+  if (!own(sql, 'where') && sql.all !== true) fail('Updates require a filter or all:true')
+  const limit = limitOf(sql)
+  return withWriteLock(() => {
+    const meta = schema(sheet), needed = new Set()
+    const fields = Object.entries(sql.set).map(([name, value]) => [columnIndex(name, meta.index), cellValue(value)])
+    const filter = own(sql, 'where') ? predicate(sql.where, meta.index, needed) : () => true
+    const values = limit === 0 ? [] : readColumns(sheet, needed, Math.max(0, sheet.getLastRow() - 1))
+    const rows = []
+    for (let i = 0; i < values.length && rows.length < limit; i++) if (filter(values[i])) rows.push(i + 2)
+    // Every field and filter is validated before the first write.
+    for (const [column, value] of fields) {
+      for (let i = 0; i < rows.length; i += 500) {
+        sheet.getRangeList(rows.slice(i, i + 500).map(row => columnLetter(column) + row)).setValue(value)
+      }
+    }
+    return {sheet: sql.update, rows}
+  })
+}
+function doInsert(sql) {
+  const sheet = permittedSheet(sql, 'insert', sql.insert_into)
+  if (!Array.isArray(sql.columns) || !sql.columns.length || new Set(sql.columns).size !== sql.columns.length) fail('Invalid insert columns')
+  if (!Array.isArray(sql.valuelist)) fail('valuelist must be an array')
+  const incoming = sql.valuelist.length === 0 ? [] : Array.isArray(sql.valuelist[0]) ? sql.valuelist : [sql.valuelist]
+  return withWriteLock(() => {
+    const meta = schema(sheet), indices = sql.columns.map(name => columnIndex(name, meta.index))
+    const rows = incoming.map(values => {
+      if (!Array.isArray(values) || values.length !== indices.length) fail('Insert row does not match columns')
+      const row = Array(meta.columns.length).fill('')
+      values.forEach((value, i) => { row[indices[i]] = cellValue(value) })
+      return row
+    })
+    const last = sheet.getLastRow(), required = last + rows.length
+    if (rows.length) {
+      if (required > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), required - sheet.getMaxRows())
+      sheet.getRange(last + 1, 1, rows.length, meta.columns.length).setValues(rows)
+    }
+    return {sheet: sql.insert_into, length: required, added: rows.length}
+  })
+}
+
+

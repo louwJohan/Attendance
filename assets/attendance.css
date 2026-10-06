@@ -1,0 +1,139 @@
+* {
+    box-sizing: border-box;
+    font-family: Arial;
+}
+
+#container {
+    position: relative;
+    margin: auto;
+    width: 300px;
+}
+
+.layout1 {
+    display: grid;
+    grid-template-columns: auto;
+    row-gap: 10px;
+}
+
+.layout_2 {
+    display: grid;
+    grid-template-columns: 1fr 30px;
+    row-gap: 2px;
+    column-gap: 0px;
+}
+
+.layout_2 button {
+    margin-top: 6px;
+}
+
+.layout3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+}
+
+.gridel {
+    position: relative;
+    font-size: 11pt;
+}
+
+.title {
+    background: teal;
+    color: white;
+    grid-column: 1 / span 2;
+}
+
+.title1 {
+    background: teal;
+    color: white;
+}
+
+button.gridel {
+    padding: 10px;
+    font-size: 11pt;
+    font-weight: bold;
+    border: 0;
+}
+
+button > * {
+    pointer-events: none;
+}
+
+button.gridel.highlight {
+    border: 1px solid black;
+}
+
+button.toggledown {
+    border: 0;
+    background-image: url('expand_more.svg');
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+}
+
+button.toggleup {
+    border: 0;
+    background-image: url('expand_less.svg');
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+    background-color: rgb(200, 200, 200);
+}
+
+#register_swap {
+    background: #d9bf77;
+    margin-top: 20px;
+}
+
+h1 {
+    font-size: 16pt;
+    font-weight: bold;
+    padding: 10pt;
+    text-align: center;
+    margin: 10px;
+}
+
+.agc {
+    background-color: rgb(250, 180, 80) !important;
+}
+
+.agc>span::after {
+    content: " \1F6C7";
+}
+
+.present {
+    background-color: rgb(100, 200, 100) !important;
+}
+.leftjust {
+    text-align: left;
+}
+
+dialog {
+    width: 280px;
+    border: 0;
+    background: #d9bf77;
+    border-radius: 10px;
+    border: 1px solid #6e613c;
+    box-shadow: 0px 0px 5px 5px #00000077;
+}
+
+dialog#warning {
+    background: red;
+}
+
+dialog#info {
+    background: #d9bf77;
+}
+
+dialog button {
+    font-size: 12pt;
+    font-weight: bold;
+    width: 40%;
+    padding: 6px;
+}
+
+#swap_message,
+#warn_message {
+    padding-bottom: 10px;
+    font-weight: bold;
+}

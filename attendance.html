@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="assets/attendance.css" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+</head>
+
+<body>
+    <div id="container">
+        <p role="status">Loading attendance…</p>
+    </div>
+
+    <dialog id="warning">
+        <p id="warn_message">Do you want to mark this student absent?</p>
+        <form method="dialog">
+            <div style="padding-top: 10px; text-align: center">
+                <button id="yesbutton" value="yes">Yes</button>
+                <button id="nobutton" value="no">No</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="warning2">
+        <p id="warn_message">
+            This student already has an existing record and can't be marked absent.
+        </p>
+        <form method="dialog">
+            <div style="padding-top: 10px; text-align: center">
+                <button id="okbutton2" value="ok">Ok</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="swap" style="position: absolute; top: 150px; z-index: 5">
+        <div id="swap_message">UB Number of Attendee:</div>
+        <form method="dialog">
+            <input id="swap_ub" type="number" style="font-size: 14pt" />
+            <div style="padding-top: 10px; text-align: center">
+                <button id="okbutton" value="ok">OK</button>
+                <button id="cancelbutton" value="cancel">Cancel</button>
+            </div>
+        </form>
+    </dialog>
+</body>
+
+<script type="module">
+    import { run_select } from './scripts/attendance.js'
+    window.onpopstate = run_select
+
+    // initial call to run:
+    run_select()
+</script>
